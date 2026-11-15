@@ -51,6 +51,10 @@ async function* replyText(
 ): AsyncGenerator<string> {
   const conversation = [...messages];
   const sources = new Map<string, Source>();
+  // Claude writes separate text blocks before and after a tool call
+  // ("I'll fetch that page." / "The heading is..."); keep them apart.
+  let wroteText = false;
+  let needsBreak = false;
 
   for (let turn = 0; turn <= MAX_CONTINUATIONS; turn++) {
     const stream = client.messages.stream(
@@ -58,8 +62,16 @@ async function* replyText(
       { signal },
     );
     for await (const event of stream) {
-      if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+      if (event.type === "content_block_start" && event.content_block.type !== "text" && wroteText) {
+        needsBreak = true;
+      }
+      if (event.type === "content_block_delta" && event.delta.type === "text_delta" && event.delta.text) {
+        if (needsBreak) {
+          yield "\n\n";
+          needsBreak = false;
+        }
         yield event.delta.text;
+        wroteText = true;
       }
     }
     const message = await stream.finalMessage();
