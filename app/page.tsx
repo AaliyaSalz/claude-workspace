@@ -175,7 +175,7 @@ export default function Home() {
     if (!input.trim() || !conversationId || loading) return;
 
     const text = input;
-    const userMessage: Message = { role: "user", content: text, localId: crypto.randomUUID() };
+    const userMessage: Message = { role: "user", content: text, sender_name: username, localId: crypto.randomUUID() };
     const history = [...messages, userMessage];
     const replyId = crypto.randomUUID();
 
@@ -199,7 +199,14 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          messages: history.filter((m) => !m.isError).map((m) => ({ role: m.role, content: m.content })),
+          // Include each speaker's name so Claude can tell group-chat participants apart.
+          messages: history
+            .filter((m) => !m.isError)
+            .map((m) => ({
+              role: m.role,
+              content: m.content,
+              name: m.role === "user" ? m.sender_name || username : undefined,
+            })),
           memories,
         }),
         signal: controller.signal,
