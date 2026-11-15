@@ -68,6 +68,12 @@ export function buildSystemPrompt(messages: ChatMessage[], memories: string[] = 
       "indication of who sent it. Don't start your own replies with a name label.",
   );
 
+  parts.push(
+    "You can search the web and read web pages. When someone shares a link or asks about something " +
+      "recent or specific, use those tools rather than guessing, and say what you found. " +
+      "The app lists your sources under your reply, so you don't need to repeat the URLs.",
+  );
+
   if (memories.length > 0) {
     parts.push(
       `Facts saved to this conversation's memory:\n${memories.map((m) => `- ${m}`).join("\n")}`,
