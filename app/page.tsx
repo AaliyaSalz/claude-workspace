@@ -45,7 +45,9 @@ export default function Home() {
   const [memories, setMemories] = useState<string[]>([]);
   const [memoryInput, setMemoryInput] = useState("");
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -81,6 +83,7 @@ export default function Home() {
         }
       } catch (e) {
         console.error("Error:", e);
+        setConnectionError("Couldn't connect to the database. Check your connection and refresh the page.");
       }
     }
     init();
@@ -154,7 +157,7 @@ export default function Home() {
   }
 
   async function sendMessage() {
-    if (!input.trim() || !conversationId) return;
+    if (!input.trim() || !conversationId || loading) return;
 
     const userMessage: Message = { role: "user", content: input };
     const updatedMessages = [...messages, userMessage];
@@ -588,17 +591,36 @@ export default function Home() {
 
         {/* Input */}
         <div className="p-4 border-t border-gray-800 bg-gray-900 shrink-0">
+          {connectionError && (
+            <p role="alert" className="mb-2 text-sm text-red-400">{connectionError}</p>
+          )}
           <div className="flex gap-2 items-end">
-            <input
-              className="flex-1 bg-gray-800 border border-gray-700 text-white rounded-xl px-4 py-3 text-sm outline-none focus:border-orange-500 transition-colors"
-              placeholder="Message Claude..."
+            <textarea
+              ref={inputRef}
+              rows={1}
+              className="flex-1 resize-none max-h-48 bg-gray-800 border border-gray-700 text-white rounded-xl px-4 py-3 text-sm outline-none focus:border-orange-500 transition-colors"
+              placeholder="Message Claude... (Shift+Enter for a new line)"
               value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && sendMessage()}
+              onChange={(e) => {
+                setInput(e.target.value);
+                // Grow with the content, up to max-h-48.
+                e.target.style.height = "auto";
+                e.target.style.height = `${e.target.scrollHeight}px`;
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  e.preventDefault();
+                  sendMessage();
+                  if (inputRef.current) inputRef.current.style.height = "auto";
+                }
+              }}
             />
             <button
-              onClick={sendMessage}
-              disabled={loading}
+              onClick={() => {
+                sendMessage();
+                if (inputRef.current) inputRef.current.style.height = "auto";
+              }}
+              disabled={loading || !input.trim() || !conversationId}
               className="bg-orange-500 hover:bg-orange-400 disabled:opacity-50 text-white px-4 py-3 rounded-xl text-sm font-medium transition-colors shrink-0"
             >
               Send
