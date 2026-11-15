@@ -81,7 +81,7 @@ export async function createBranch(parentConversationId: string, branchedFromMes
   export async function generateShareToken(conversationId: string) {
     const token = Math.random().toString(36).substring(2, 15);
     
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from("conversations")
       .update({ share_token: token })
       .eq("id", conversationId)

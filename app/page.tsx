@@ -525,7 +525,7 @@ export default function Home() {
                     {msg.sender_name || (msg.role === "user" ? username : "Claude")}
                   </span>
                   <div
-                    className={`px-4 py-3 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap break-words transition-all duration-500 ${
+                    className={`px-4 py-3 rounded-2xl text-sm leading-relaxed break-words transition-all duration-500 ${
                       msg.role === "user"
                         ? "bg-orange-500 text-white rounded-tr-sm"
                         : "bg-gray-800 text-gray-100 rounded-tl-sm"
@@ -539,7 +539,7 @@ export default function Home() {
                     {msg.role === "assistant" ? (
                       <ReactMarkdown
                         components={{
-                          p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                          p: ({ children }) => <p className="mb-2 last:mb-0 whitespace-pre-wrap">{children}</p>,
                           ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>,
                           ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>,
                           li: ({ children }) => <li className="text-sm">{children}</li>,
@@ -554,7 +554,7 @@ export default function Home() {
                         {msg.content}
                       </ReactMarkdown>
                     ) : (
-                      msg.content
+                      <span className="whitespace-pre-wrap">{msg.content}</span>
                     )}
                   </div>
                 </div>
