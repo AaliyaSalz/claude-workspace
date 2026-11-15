@@ -1,0 +1,44 @@
+# Supabase free-tier projects pause after ~7 days without activity.
+# This workflow runs a tiny read query every 2 days so the project stays awake.
+# If the ping fails (e.g. the project is already paused), the run fails and
+# GitHub emails you.
+#
+# Required repository secrets (Settings -> Secrets and variables -> Actions):
+#   SUPABASE_URL       e.g. https://<project-ref>.supabase.co
+#   SUPABASE_ANON_KEY  the public anon key (same value as NEXT_PUBLIC_SUPABASE_ANON_KEY)
+
+name: Supabase keep-alive
+
+on:
+  schedule:
+    - cron: "0 14 */2 * *" # every 2 days at 14:00 UTC
+  workflow_dispatch: # allows a manual run from the Actions tab
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Query Supabase
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_ANON_KEY" ]; then
+            echo "::error::SUPABASE_URL or SUPABASE_ANON_KEY secret is not set"
+            exit 1
+          fi
+
+          status=$(curl -s -o response.json -w "%{http_code}" \
+            --retry 3 --retry-delay 10 \
+            "$SUPABASE_URL/rest/v1/conversations?select=id&limit=1" \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY")
+
+          echo "HTTP $status"
+          if [ "$status" -ne 200 ]; then
+            echo "::error::Supabase ping failed with HTTP $status. The project may be paused; restore it in the Supabase dashboard."
+            cat response.json
+            exit 1
+          fi
+          echo "Supabase is awake."
