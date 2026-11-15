@@ -525,7 +525,7 @@ export default function Home() {
                     {msg.sender_name || (msg.role === "user" ? username : "Claude")}
                   </span>
                   <div
-                    className={`px-4 py-3 rounded-2xl text-sm leading-relaxed transition-all duration-500 ${
+                    className={`px-4 py-3 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap break-words transition-all duration-500 ${
                       msg.role === "user"
                         ? "bg-orange-500 text-white rounded-tr-sm"
                         : "bg-gray-800 text-gray-100 rounded-tl-sm"
