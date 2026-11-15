@@ -162,25 +162,39 @@ export default function Home() {
     setInput("");
     setLoading(true);
 
-    const savedUser = await saveMessage(conversationId, "user", input, username);
-    userMessage.id = savedUser.id;
+    try {
+      const savedUser = await saveMessage(conversationId, "user", input, username);
+      userMessage.id = savedUser.id;
 
-    const response = await fetch("/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        messages: updatedMessages.map(m => ({ role: m.role, content: m.content })),
-        memories: memories,
-      }),
-    });
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: updatedMessages.map(m => ({ role: m.role, content: m.content })),
+          memories: memories,
+        }),
+      });
 
-    const data = await response.json();
-    const assistantMessage: Message = { role: "assistant", content: data.message };
-    const savedAssistant = await saveMessage(conversationId, "assistant", data.message, "Claude");
-    assistantMessage.id = savedAssistant.id;
+      const data = await response.json();
+      if (!response.ok || !data.message) {
+        throw new Error(data.error || `Request failed with status ${response.status}`);
+      }
 
-    setMessages([...updatedMessages, assistantMessage]);
-    setLoading(false);
+      const assistantMessage: Message = { role: "assistant", content: data.message };
+      const savedAssistant = await saveMessage(conversationId, "assistant", data.message, "Claude");
+      assistantMessage.id = savedAssistant.id;
+
+      setMessages([...updatedMessages, assistantMessage]);
+    } catch (e) {
+      console.error("Chat error:", e);
+      // Shown in the chat but not saved to the database.
+      setMessages([
+        ...updatedMessages,
+        { role: "assistant", content: `⚠️ Claude couldn't respond: ${e instanceof Error ? e.message : String(e)}` },
+      ]);
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function handlePin(message: Message) {

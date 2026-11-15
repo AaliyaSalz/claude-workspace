@@ -1,6 +1,9 @@
 import Anthropic from "@anthropic-ai/sdk";
 
-const client = new Anthropic();
+// Vercel stores the key as ANTHROPIC_KEY; the SDK's default name is ANTHROPIC_API_KEY.
+const client = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY ?? process.env.ANTHROPIC_KEY,
+});
 
 export async function POST(request: Request) {
   try {
