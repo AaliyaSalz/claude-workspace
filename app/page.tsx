@@ -7,6 +7,10 @@ import { supabase } from "@/lib/supabase";
 
 type Message = {
   id?: string;
+  /** Client-only key for a message that hasn't been saved yet (e.g. a reply still streaming). */
+  localId?: string;
+  /** Client-only error notice: shown in the chat, never saved or sent to Claude. */
+  isError?: boolean;
   role: "user" | "assistant";
   content: string;
   is_pinned?: boolean;
@@ -46,6 +50,8 @@ export default function Home() {
   const [memoryInput, setMemoryInput] = useState("");
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [awaitingFirstToken, setAwaitingFirstToken] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -105,8 +111,15 @@ export default function Home() {
         (payload) => {
           const newMessage = payload.new as Message;
           setMessages((prev) => {
-            const exists = prev.some((m) => m.id === newMessage.id);
-            if (exists) return prev;
+            if (prev.some((m) => m.id === newMessage.id)) return prev;
+            // Our own message can arrive here before saveMessage() returns its id:
+            // attach the id to the local copy instead of adding a duplicate.
+            const localIndex = prev.findIndex(
+              (m) => !m.id && m.role === newMessage.role && m.content === newMessage.content
+            );
+            if (localIndex !== -1) {
+              return prev.map((m, i) => (i === localIndex ? { ...m, id: newMessage.id } : m));
+            }
             return [...prev, newMessage];
           });
         }
@@ -159,45 +172,93 @@ export default function Home() {
   async function sendMessage() {
     if (!input.trim() || !conversationId || loading) return;
 
-    const userMessage: Message = { role: "user", content: input };
-    const updatedMessages = [...messages, userMessage];
-    setMessages(updatedMessages);
+    const text = input;
+    const userMessage: Message = { role: "user", content: text, localId: crypto.randomUUID() };
+    const history = [...messages, userMessage];
+    const replyId = crypto.randomUUID();
+
+    setMessages(history);
     setInput("");
     setLoading(true);
+    setAwaitingFirstToken(true);
+
+    const updateMessage = (localId: string, patch: Partial<Message>) =>
+      setMessages((prev) => prev.map((m) => (m.localId === localId ? { ...m, ...patch } : m)));
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+    let reply = "";
 
     try {
-      const savedUser = await saveMessage(conversationId, "user", input, username);
-      userMessage.id = savedUser.id;
+      const savedUser = await saveMessage(conversationId, "user", text, username);
+      updateMessage(userMessage.localId!, { id: savedUser.id });
 
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          messages: updatedMessages.map(m => ({ role: m.role, content: m.content })),
-          memories: memories,
+          messages: history.filter((m) => !m.isError).map((m) => ({ role: m.role, content: m.content })),
+          memories,
         }),
+        signal: controller.signal,
       });
 
-      const data = await response.json();
-      if (!response.ok || !data.message) {
+      if (!response.ok || !response.body) {
+        const data = await response.json().catch(() => ({}));
         throw new Error(data.error || `Request failed with status ${response.status}`);
       }
 
-      const assistantMessage: Message = { role: "assistant", content: data.message };
-      const savedAssistant = await saveMessage(conversationId, "assistant", data.message, "Claude");
-      assistantMessage.id = savedAssistant.id;
+      // Show an empty bubble that fills in as text streams.
+      setMessages((prev) => [...prev, { role: "assistant", content: "", localId: replyId }]);
+      setAwaitingFirstToken(false);
 
-      setMessages([...updatedMessages, assistantMessage]);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        reply += decoder.decode(value, { stream: true });
+        updateMessage(replyId, { content: reply });
+      }
+      reply += decoder.decode();
+      if (!reply.trim()) throw new Error("Claude returned an empty response.");
     } catch (e) {
-      console.error("Chat error:", e);
-      // Shown in the chat but not saved to the database.
-      setMessages([
-        ...updatedMessages,
-        { role: "assistant", content: `⚠️ Claude couldn't respond: ${e instanceof Error ? e.message : String(e)}` },
-      ]);
+      const stopped = controller.signal.aborted;
+      if (!stopped) console.error("Chat error:", e);
+      if (!reply.trim()) {
+        // Nothing usable arrived: replace the empty bubble with an error notice (not saved).
+        setMessages((prev) => [
+          ...prev.filter((m) => m.localId !== replyId),
+          {
+            role: "assistant",
+            localId: replyId,
+            isError: true,
+            content: stopped
+              ? "⏹ Stopped before Claude replied."
+              : `⚠️ Claude couldn't respond: ${e instanceof Error ? e.message : String(e)}`,
+          },
+        ]);
+        return;
+      }
+      // Partial reply (stopped or cut off): keep what arrived and save it below.
+      if (!stopped) reply += "\n\n⚠️ The response was cut off.";
+      updateMessage(replyId, { content: reply });
     } finally {
+      abortRef.current = null;
+      setAwaitingFirstToken(false);
       setLoading(false);
     }
+
+    try {
+      const savedReply = await saveMessage(conversationId, "assistant", reply, "Claude");
+      updateMessage(replyId, { id: savedReply.id });
+    } catch (e) {
+      console.error("Failed to save reply:", e);
+    }
+  }
+
+  function stopGenerating() {
+    abortRef.current?.abort();
   }
 
   async function handlePin(message: Message) {
@@ -577,7 +638,7 @@ export default function Home() {
               </div>
             </div>
           ))}
-          {loading && (
+          {awaitingFirstToken && (
             <div className="flex justify-start">
               <div className="flex items-center gap-2 bg-gray-800 text-gray-400 px-4 py-3 rounded-2xl rounded-tl-sm text-sm">
                 <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
@@ -615,16 +676,26 @@ export default function Home() {
                 }
               }}
             />
-            <button
-              onClick={() => {
-                sendMessage();
-                if (inputRef.current) inputRef.current.style.height = "auto";
-              }}
-              disabled={loading || !input.trim() || !conversationId}
-              className="bg-orange-500 hover:bg-orange-400 disabled:opacity-50 text-white px-4 py-3 rounded-xl text-sm font-medium transition-colors shrink-0"
-            >
-              Send
-            </button>
+            {loading ? (
+              <button
+                onClick={stopGenerating}
+                aria-label="Stop generating"
+                className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-3 rounded-xl text-sm font-medium transition-colors shrink-0"
+              >
+                ■ Stop
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  sendMessage();
+                  if (inputRef.current) inputRef.current.style.height = "auto";
+                }}
+                disabled={!input.trim() || !conversationId}
+                className="bg-orange-500 hover:bg-orange-400 disabled:opacity-50 text-white px-4 py-3 rounded-xl text-sm font-medium transition-colors shrink-0"
+              >
+                Send
+              </button>
+            )}
           </div>
         </div>
 
