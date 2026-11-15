@@ -362,9 +362,13 @@ export default function Home() {
 
   async function handleShare() {
     if (!conversationId) return;
-    const token = await generateShareToken(conversationId);
-    const url = `${window.location.origin}?token=${token}`;
-    setShareUrl(url);
+    try {
+      const token = await generateShareToken(conversationId);
+      setShareUrl(`${window.location.origin}?token=${encodeURIComponent(token)}`);
+    } catch (e) {
+      console.error("Failed to create share link:", e);
+      setConnectionError("Couldn't create a share link. Please try again.");
+    }
   }
 
   async function copyShareUrl() {
