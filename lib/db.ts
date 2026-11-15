@@ -78,9 +78,20 @@ export async function createBranch(parentConversationId: string, branchedFromMes
     return data;
   }
 
+  /**
+   * Returns an unguessable share token: 128 bits from the cryptographically
+   * secure generator, encoded as 22 URL-safe characters.
+   * (Math.random() is predictable and was producing ~11-character tokens.)
+   */
+  export function createSecureToken(byteLength = 16): string {
+    const bytes = crypto.getRandomValues(new Uint8Array(byteLength));
+    const base64 = btoa(String.fromCharCode(...bytes));
+    return base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+
   export async function generateShareToken(conversationId: string) {
-    const token = Math.random().toString(36).substring(2, 15);
-    
+    const token = createSecureToken();
+
     const { error } = await supabase
       .from("conversations")
       .update({ share_token: token })
