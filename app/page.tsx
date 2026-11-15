@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useRef } from "react";
 import ReactMarkdown from "react-markdown";
+import rehypeHighlight from "rehype-highlight";
+import CodeBlock from "@/components/CodeBlock";
 import { saveMessage, pinMessage, getPinnedMessages, createBranch, generateShareToken, getConversationByToken, saveMemory, getMemories } from "@/lib/db";
 import { supabase } from "@/lib/supabase";
 
@@ -612,9 +614,17 @@ export default function Home() {
                           h1: ({ children }) => <h1 className="text-base font-bold mb-2">{children}</h1>,
                           h2: ({ children }) => <h2 className="text-sm font-bold mb-1">{children}</h2>,
                           h3: ({ children }) => <h3 className="text-sm font-semibold mb-1">{children}</h3>,
-                          code: ({ children }) => <code className="bg-gray-700 px-1 py-0.5 rounded text-xs font-mono">{children}</code>,
-                          pre: ({ children }) => <pre className="bg-gray-700 p-3 rounded-lg text-xs font-mono overflow-x-auto mb-2">{children}</pre>,
+                          // Fenced blocks keep rehype-highlight's classes; inline `code` gets a pill style.
+                          code: ({ className, children }) =>
+                            className ? (
+                              <code className={className}>{children}</code>
+                            ) : (
+                              <code className="bg-gray-700 px-1 py-0.5 rounded text-xs font-mono">{children}</code>
+                            ),
+                          pre: CodeBlock,
                         }}
+                        // Highlight only blocks that name their language; guessing mislabels plain text.
+                        rehypePlugins={[rehypeHighlight]}
                       >
                         {msg.content}
                       </ReactMarkdown>
