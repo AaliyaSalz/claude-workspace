@@ -1,5 +1,11 @@
 # Claude Workspace
 
+[![CI](https://github.com/AaliyaSalz/claude-workspace/actions/workflows/ci.yml/badge.svg)](https://github.com/AaliyaSalz/claude-workspace/actions/workflows/ci.yml)
+[![Supabase keep-alive](https://github.com/AaliyaSalz/claude-workspace/actions/workflows/supabase-keepalive.yml/badge.svg)](https://github.com/AaliyaSalz/claude-workspace/actions/workflows/supabase-keepalive.yml)
+![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
+![Supabase](https://img.shields.io/badge/Supabase-Postgres%20%2B%20Realtime-3ECF8E?logo=supabase&logoColor=white)
+
 A full-stack AI productivity app built on the Claude API that explores features missing from current AI chat interfaces. Built in the summer after my freshman year at Vanderbilt as a demonstration of product thinking and technical ability.
 
 **[Try it live →](https://claude-workspace-sandy.vercel.app)**
@@ -40,6 +46,49 @@ Explicitly save facts for Claude to remember. Memories are injected into every m
 - **Database:** Supabase (PostgreSQL + Realtime)
 - **AI:** Anthropic Claude API (claude-sonnet-4-5)
 - **Deployment:** Vercel
+- **CI/CD:** GitHub Actions (lint, type check and build on every pull request), Vercel auto-deploys from `main`
+
+---
+
+## Architecture
+
+```mermaid
+flowchart LR
+    U[Browser<br/>Next.js + React] -->|POST /api/chat<br/>messages + memories| API[Next.js API route<br/>server only]
+    API -->|Messages API| C[Claude API]
+    U <-->|read / write<br/>conversations, messages,<br/>branches, memories| DB[(Supabase<br/>PostgreSQL)]
+    DB -.->|Realtime: new messages| U
+    GH[GitHub Actions] -.->|ping every 2 days| DB
+```
+
+- **The Anthropic API key never reaches the browser.** All Claude calls go through `app/api/chat/route.ts` on the server.
+- **Memory** works by injecting saved facts into the system prompt on every request.
+- **Shared conversations** subscribe to Supabase Realtime, so every participant sees new messages as they arrive.
+- **A scheduled GitHub Action** pings Supabase every 2 days so the free-tier project never auto-pauses.
+
+### Data model
+
+| Table | Purpose |
+|---|---|
+| `conversations` | One row per conversation, with an optional `share_token` for share links |
+| `messages` | Messages per conversation: role, content, sender name, pinned state |
+| `branches` | Links a branch to the parent conversation and the message it forked from |
+| `memories` | Facts saved for Claude to remember |
+
+### Project structure
+
+```
+app/
+  api/chat/route.ts   # Server route that calls the Claude API
+  page.tsx            # Main workspace UI
+  layout.tsx          # Root layout and page metadata
+lib/
+  supabase.ts         # Supabase client
+  db.ts               # Database helpers (conversations, messages, branches, memories)
+.github/workflows/
+  ci.yml                  # Lint, type check and build on every PR
+  supabase-keepalive.yml  # Keeps the Supabase project awake
+```
 
 ---
 
@@ -47,7 +96,7 @@ Explicitly save facts for Claude to remember. Memories are injected into every m
 
 1. Clone the repo
 ```bash
-   git clone https://github.com/amskp1572-a11y/claude-workspace.git
+   git clone https://github.com/AaliyaSalz/claude-workspace.git
    cd claude-workspace
 ```
 
@@ -56,7 +105,16 @@ Explicitly save facts for Claude to remember. Memories are injected into every m
    npm install
 ```
 
-3. Create a `.env.local` file in the root with your keys:
+3. Copy the example environment file and fill in your keys:
+```bash
+   cp .env.example .env.local
+```
+
+| Variable | Where to find it |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase → Project Settings → Data API |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase → Project Settings → API Keys (anon or publishable key) |
+| `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com) → API Keys. Server-side only |
 
 4. Run the development server
 ```bash
@@ -64,6 +122,29 @@ Explicitly save facts for Claude to remember. Memories are injected into every m
 ```
 
 5. Open [http://localhost:3000](http://localhost:3000)
+
+### Checks
+
+The same checks CI runs on every pull request:
+
+```bash
+npm run lint
+npm run typecheck
+npm run build
+```
+
+---
+
+## Roadmap
+
+Planned work is tracked in [GitHub Issues](https://github.com/AaliyaSalz/claude-workspace/issues) and grouped into milestones:
+
+- **v0.2 Polish:** streaming responses, code highlighting with copy buttons, mobile layout, message actions
+- **v0.3 Accounts & security:** real sign-in with Supabase Auth, row-level security, rate limiting on the chat API
+- **v0.4 Smarter memory:** automatic memory extraction with pgvector retrieval
+- **v0.5 Collaboration:** presence and typing indicators, @claude mentions, visual branch tree
+
+Every change goes through a branch and pull request with CI checks before merging to `main`.
 
 ---
 
