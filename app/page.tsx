@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import CodeBlock from "@/components/CodeBlock";
-import { saveMessage, pinMessage, getPinnedMessages, createBranch, generateShareToken, getConversationByToken, saveMemory, getMemories } from "@/lib/db";
+import { saveMessage, pinMessage, createBranch, generateShareToken, getConversationByToken, saveMemory, getMemories } from "@/lib/db";
 import { supabase } from "@/lib/supabase";
 
 type Message = {
@@ -37,7 +37,6 @@ type SelectionPopup = {
 
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
-  const [pinnedMessages, setPinnedMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [conversationId, setConversationId] = useState<string | null>(null);
@@ -56,6 +55,11 @@ export default function Home() {
   const abortRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Pins are read straight from the conversation's messages (snippets are message
+  // rows too), so anything that updates `messages` - including Realtime events from
+  // other participants - updates the pinned sidebar as well.
+  const pinnedMessages = messages.filter((m) => m.is_pinned);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -126,6 +130,21 @@ export default function Home() {
           });
         }
       )
+      .on(
+        "postgres_changes",
+        {
+          // Pinning or unpinning updates an existing row; apply it so every
+          // participant's pinned sidebar stays in sync.
+          event: "UPDATE",
+          schema: "public",
+          table: "messages",
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        (payload) => {
+          const updated = payload.new as Message;
+          setMessages((prev) => prev.map((m) => (m.id === updated.id ? { ...m, ...updated } : m)));
+        }
+      )
       .subscribe();
 
     return () => {
@@ -166,7 +185,6 @@ export default function Home() {
     setActiveConversationIndex(conversations.length);
     setConversationId(data.id);
     setMessages([]);
-    setPinnedMessages([]);
     setMemories([]);
     setShareUrl(null);
   }
@@ -200,8 +218,9 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           // Include each speaker's name so Claude can tell group-chat participants apart.
+          // Snippets are stored as message rows for pinning; they aren't part of the conversation.
           messages: history
-            .filter((m) => !m.isError)
+            .filter((m) => !m.isError && !m.is_snippet)
             .map((m) => ({
               role: m.role,
               content: m.content,
@@ -273,10 +292,14 @@ export default function Home() {
   async function handlePin(message: Message) {
     if (!message.id || !conversationId) return;
     const newPinned = !message.is_pinned;
-    await pinMessage(message.id, newPinned);
+    // Update the screen right away, then save; roll back if the save fails.
     setMessages(prev => prev.map(m => m.id === message.id ? { ...m, is_pinned: newPinned } : m));
-    const pins = await getPinnedMessages(conversationId);
-    setPinnedMessages(pins);
+    try {
+      await pinMessage(message.id, newPinned);
+    } catch (e) {
+      console.error("Failed to update pin:", e);
+      setMessages(prev => prev.map(m => m.id === message.id ? { ...m, is_pinned: !newPinned } : m));
+    }
   }
 
   function handleTextSelection(messageId: string) {
@@ -300,7 +323,7 @@ export default function Home() {
   async function pinSelection() {
     if (!selectionPopup || !conversationId) return;
 
-    const { error } = await supabase
+    const { data: snippet, error } = await supabase
       .from("messages")
       .insert({
         conversation_id: conversationId,
@@ -310,16 +333,18 @@ export default function Home() {
         is_snippet: true,
         snippet_text: selectionPopup.text,
         source_message_id: selectionPopup.messageId,
-      });
+      })
+      .select()
+      .single();
 
     if (error) { console.error(error); return; }
 
     setSelectionPopup(null);
-    const pins = await getPinnedMessages(conversationId);
-    setPinnedMessages(pins);
+    // Realtime delivers the same row to everyone (us included); skip it if it's already here.
+    setMessages(prev => (prev.some(m => m.id === snippet.id) ? prev : [...prev, snippet]));
   }
 
-  async function handleBranch(message: Message, messageIndex: number) {
+  async function handleBranch(message: Message) {
     if (!message.id || !conversationId) return;
 
     const { data: newConv, error } = await supabase
@@ -332,9 +357,14 @@ export default function Home() {
 
     await createBranch(conversationId, message.id);
 
-    const messagesToCopy = messages.slice(0, messageIndex + 1);
-    for (const msg of messagesToCopy) {
-      await saveMessage(newConv.id, msg.role, msg.content);
+    // Copy the conversation up to and including this message (snippets stay with the
+    // original). Use the saved copies so the branch has its own ids and no inherited pins;
+    // otherwise pinning in the branch would pin the original conversation's message.
+    const conversation = messages.filter((m) => !m.is_snippet && !m.isError);
+    const cutoff = conversation.findIndex((m) => m.id === message.id);
+    const messagesToCopy: Message[] = [];
+    for (const msg of conversation.slice(0, cutoff + 1)) {
+      messagesToCopy.push(await saveMessage(newConv.id, msg.role, msg.content, msg.sender_name));
     }
 
     const newConversation: Conversation = {
@@ -347,7 +377,6 @@ export default function Home() {
     setActiveConversationIndex(conversations.length);
     setConversationId(newConv.id);
     setMessages(messagesToCopy);
-    setPinnedMessages([]);
   }
 
   async function switchConversation(index: number) {
@@ -362,8 +391,6 @@ export default function Home() {
       .order("created_at", { ascending: true });
 
     setMessages(data || []);
-    const pins = await getPinnedMessages(conv.id);
-    setPinnedMessages(pins);
     const mems = await getMemories(conv.id);
     setMemories(mems.map((m: { content: string }) => m.content));
     setShareUrl(null);
@@ -587,7 +614,7 @@ export default function Home() {
                       {msg.is_pinned ? "📌" : "Pin"}
                     </button>
                     <button
-                      onClick={() => handleBranch(msg, index)}
+                      onClick={() => handleBranch(msg)}
                       className="text-xs px-2 py-1 rounded-lg bg-gray-800 text-gray-400 hover:bg-green-800 hover:text-green-300 transition-colors"
                     >
                       Branch
@@ -649,7 +676,7 @@ export default function Home() {
                       {msg.is_pinned ? "📌" : "Pin"}
                     </button>
                     <button
-                      onClick={() => handleBranch(msg, index)}
+                      onClick={() => handleBranch(msg)}
                       className="text-xs px-2 py-1 rounded-lg bg-gray-800 text-gray-400 hover:bg-green-800 hover:text-green-300 transition-colors"
                     >
                       Branch
