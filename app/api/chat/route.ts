@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { buildSystemPrompt, toClaudeMessages, type ChatMessage } from "@/lib/chatPrompt";
 
 // Vercel stores the key as ANTHROPIC_KEY; the SDK's default name is ANTHROPIC_API_KEY.
 const client = new Anthropic({
@@ -17,23 +18,17 @@ const client = new Anthropic({
  */
 export async function POST(request: Request) {
   const { messages, memories } = (await request.json()) as {
-    messages: Anthropic.MessageParam[];
+    messages: ChatMessage[];
     memories?: string[];
   };
-
-  const systemPrompt =
-    memories && memories.length > 0
-      ? `You are a helpful assistant. Here are some things to remember about the user:\n${memories
-          .map((m) => `- ${m}`)
-          .join("\n")}`
-      : "You are a helpful assistant.";
 
   const stream = client.messages.stream(
     {
       model: "claude-sonnet-4-5",
       max_tokens: 8192,
-      system: systemPrompt,
-      messages,
+      // Tells Claude who is in the chat; each user message is labelled with its speaker.
+      system: buildSystemPrompt(messages, memories),
+      messages: toClaudeMessages(messages),
     },
     { signal: request.signal },
   );
