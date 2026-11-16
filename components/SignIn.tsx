@@ -93,6 +93,9 @@ export default function SignIn() {
           <p className="text-center text-xs text-red-400">No sign-in methods are enabled yet.</p>
         )}
         {error && <p role="alert" className="text-center text-xs text-red-400">{error}</p>}
+        <a href="/privacy" className="text-center text-[11px] text-gray-500 hover:text-gray-300 underline mt-1">
+          Privacy Policy
+        </a>
       </div>
     </main>
   );
