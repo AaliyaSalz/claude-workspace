@@ -103,15 +103,29 @@ export async function createBranch(parentConversationId: string, branchedFromMes
     return token;
   }
   
-  export async function getConversationByToken(token: string) {
+  /**
+   * Opens a share link: finds the conversation by its token and adds the
+   * signed-in person as a member, so row-level security lets them in.
+   * Returns null when the link is wrong or has been replaced.
+   */
+  export async function joinConversation(token: string) {
     const { data, error } = await supabase
-      .from("conversations")
-      .select("*")
-      .eq("share_token", token)
-      .single();
-  
+      .rpc("join_conversation", { share: token })
+      .maybeSingle<{ id: string; title: string }>();
+
     if (error) throw error;
     return data;
+  }
+
+  /** Every conversation the signed-in person owns or has joined, oldest first. */
+  export async function listConversations() {
+    const { data, error } = await supabase
+      .from("conversations")
+      .select("id, title, created_at")
+      .order("created_at", { ascending: true });
+
+    if (error) throw error;
+    return data as { id: string; title: string; created_at: string }[];
   }
 
   export async function saveMemory(conversationId: string, content: string) {
