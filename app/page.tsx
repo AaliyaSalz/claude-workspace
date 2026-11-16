@@ -4,6 +4,8 @@ import { useState, useEffect, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import CodeBlock from "@/components/CodeBlock";
+import SignIn from "@/components/SignIn";
+import { displayNameOf, signOut, takePendingShareToken, useSession } from "@/lib/auth";
 import { saveMessage, pinMessage, createBranch, generateShareToken, getConversationByToken, saveMemory, getMemories } from "@/lib/db";
 import { supabase } from "@/lib/supabase";
 
@@ -45,8 +47,11 @@ export default function Home() {
   const [selectionPopup, setSelectionPopup] = useState<SelectionPopup>(null);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [username, setUsername] = useState("");
-  const [usernameSet, setUsernameSet] = useState(false);
+  // Who is signed in. Names come from the account (or "Name (guest)"), so nobody
+  // can post under someone else's name.
+  const { user, loading: authLoading } = useSession();
+  const userId = user?.id;
+  const username = displayNameOf(user);
   const [memories, setMemories] = useState<string[]>([]);
   const [memoryInput, setMemoryInput] = useState("");
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
@@ -62,8 +67,24 @@ export default function Home() {
   const pinnedMessages = messages.filter((m) => m.is_pinned);
 
   useEffect(() => {
+    // Start the workspace only once someone is signed in.
+    if (!userId) return;
+
     const params = new URLSearchParams(window.location.search);
-    const token = params.get("token");
+    // A share link opened before signing in with Google: its token was saved
+    // before the redirect (see signInWith), in case the URL lost it on the way back.
+    const pendingToken = takePendingShareToken();
+    const token = params.get("token") ?? pendingToken;
+
+    // After Google sign-in the URL carries a one-time ?code=; it has been
+    // exchanged by now, so drop it, and put ?token= back so a reload stays in
+    // the shared conversation.
+    if (params.has("code") || (token && !params.has("token"))) {
+      params.delete("code");
+      if (token) params.set("token", token);
+      const query = params.toString();
+      window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+    }
 
     async function init() {
       try {
@@ -99,7 +120,7 @@ export default function Home() {
       }
     }
     init();
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     if (!conversationId) return;
@@ -421,32 +442,22 @@ export default function Home() {
     setMemoryInput("");
   }
 
-  if (!usernameSet) {
+  if (authLoading) {
+    // This is also what the pre-rendered HTML contains, so crawlers see real text.
     return (
-      <main className="flex min-h-screen items-center justify-center bg-gray-950 text-white">
-        <div className="bg-gray-900 border border-gray-800 p-8 rounded-2xl flex flex-col gap-4 w-80 shadow-2xl">
-          <div className="flex flex-col items-center gap-2 mb-2">
-            <div className="w-10 h-10 bg-orange-500 rounded-xl flex items-center justify-center text-xl">✦</div>
-            <h1 className="text-xl font-bold">Claude Workspace</h1>
-            <p className="text-gray-400 text-xs text-center">A smarter way to work with AI</p>
-          </div>
-          <input
-            className="bg-gray-800 border border-gray-700 text-white rounded-xl px-4 py-2 text-sm outline-none focus:border-orange-500 transition-colors"
-            placeholder="Enter your name..."
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && username.trim() && setUsernameSet(true)}
-            autoFocus
-          />
-          <button
-            onClick={() => username.trim() && setUsernameSet(true)}
-            className="bg-orange-500 hover:bg-orange-400 text-white px-4 py-2 rounded-xl text-sm font-medium transition-colors"
-          >
-            Enter Workspace →
-          </button>
-        </div>
+      <main className="flex min-h-screen flex-col items-center justify-center gap-2 bg-gray-950 text-white px-4 text-center">
+        <div className="w-10 h-10 bg-orange-500 rounded-xl flex items-center justify-center text-xl">✦</div>
+        <h1 className="text-xl font-bold">Claude Workspace</h1>
+        <p className="text-gray-400 text-sm max-w-md">
+          A smarter way to work with AI: branching conversations, memory, pinned snippets and shared chats with Claude.
+        </p>
+        <p className="text-gray-600 text-xs mt-2">Loading…</p>
       </main>
     );
+  }
+
+  if (!user) {
+    return <SignIn />;
   }
 
   return (
@@ -572,7 +583,17 @@ export default function Home() {
           <div className="w-7 h-7 bg-blue-600 rounded-full flex items-center justify-center text-xs font-bold">
             {username.charAt(0).toUpperCase()}
           </div>
-          <span className="text-xs text-gray-300">{username}</span>
+          <span className="text-xs text-gray-300 truncate flex-1" title={username}>{username}</span>
+          <button
+            onClick={async () => {
+              await signOut();
+              // Reload so no conversation state carries over to the next person.
+              window.location.reload();
+            }}
+            className="text-xs text-gray-500 hover:text-white transition-colors shrink-0"
+          >
+            Sign out
+          </button>
         </div>
 
       </div>
