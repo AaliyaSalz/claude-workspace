@@ -61,12 +61,39 @@ export async function enabledSignInMethods(): Promise<{ providers: OAuthProvider
   }
 }
 
-/** Sends the person to Google and back to the page they were on (share link included). */
+const PENDING_SHARE_TOKEN = "pendingShareToken";
+
+/**
+ * Sends the person to Google and back to this page. A share link's ?token= is kept
+ * in localStorage instead of the redirect URL: Supabase only returns to URLs on its
+ * allow list and otherwise falls back to the Site URL, which would drop the token
+ * and drop the person into a new conversation instead of the shared one.
+ */
 export async function signInWith(provider: OAuthProvider) {
+  const url = new URL(window.location.href);
+  const token = url.searchParams.get("token");
+  if (token) {
+    try {
+      localStorage.setItem(PENDING_SHARE_TOKEN, token);
+    } catch {
+      // Storage blocked: the token is still in the redirect URL below as a fallback.
+    }
+  }
   return supabase.auth.signInWithOAuth({
     provider,
-    options: { redirectTo: window.location.href },
+    options: { redirectTo: `${url.origin}${url.pathname}${token ? `?token=${encodeURIComponent(token)}` : ""}` },
   });
+}
+
+/** The share token saved before a sign-in redirect, if any. It's removed once read. */
+export function takePendingShareToken(): string | null {
+  try {
+    const token = localStorage.getItem(PENDING_SHARE_TOKEN);
+    localStorage.removeItem(PENDING_SHARE_TOKEN);
+    return token;
+  } catch {
+    return null;
+  }
 }
 
 /** Creates an anonymous guest account that remembers the name they chose. */

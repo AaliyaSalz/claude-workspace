@@ -5,7 +5,7 @@ import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import CodeBlock from "@/components/CodeBlock";
 import SignIn from "@/components/SignIn";
-import { displayNameOf, signOut, useSession } from "@/lib/auth";
+import { displayNameOf, signOut, takePendingShareToken, useSession } from "@/lib/auth";
 import { saveMessage, pinMessage, createBranch, generateShareToken, getConversationByToken, saveMemory, getMemories } from "@/lib/db";
 import { supabase } from "@/lib/supabase";
 
@@ -71,12 +71,17 @@ export default function Home() {
     if (!userId) return;
 
     const params = new URLSearchParams(window.location.search);
-    const token = params.get("token");
+    // A share link opened before signing in with Google: its token was saved
+    // before the redirect (see signInWith), in case the URL lost it on the way back.
+    const pendingToken = takePendingShareToken();
+    const token = params.get("token") ?? pendingToken;
 
     // After Google sign-in the URL carries a one-time ?code=; it has been
-    // exchanged by now, so drop it (keeping ?token= for shared conversations).
-    if (params.has("code")) {
+    // exchanged by now, so drop it, and put ?token= back so a reload stays in
+    // the shared conversation.
+    if (params.has("code") || (token && !params.has("token"))) {
       params.delete("code");
+      if (token) params.set("token", token);
       const query = params.toString();
       window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
     }
