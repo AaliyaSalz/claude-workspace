@@ -4,11 +4,10 @@ import { useEffect, useState } from "react";
 import { continueAsGuest, enabledSignInMethods, signInWith, type OAuthProvider } from "@/lib/auth";
 
 const PROVIDER_LABELS: Record<OAuthProvider, string> = {
-  github: "Continue with GitHub",
   google: "Continue with Google",
 };
 
-/** Sign-in screen: GitHub/Google (whichever are enabled in Supabase) or a named guest. */
+/** Sign-in screen: Google (once enabled in Supabase) or a named guest. No account needed for guests. */
 export default function SignIn() {
   const [methods, setMethods] = useState<{ providers: OAuthProvider[]; guests: boolean } | null>(null);
   const [guestName, setGuestName] = useState("");
@@ -23,7 +22,7 @@ export default function SignIn() {
     setBusy(true);
     setError(null);
     const { error } = await signInWith(provider);
-    // On success the browser leaves for GitHub/Google, so we only get here on failure.
+    // On success the browser leaves for Google, so we only get here on failure.
     if (error) {
       setError(error.message);
       setBusy(false);

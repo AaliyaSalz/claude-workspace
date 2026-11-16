@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase, supabaseAnonKey, supabaseUrl } from "./supabase";
 
-export type OAuthProvider = "github" | "google";
+export type OAuthProvider = "google";
 
 /**
  * The name shown on a person's messages. It comes from their account, so people
@@ -53,15 +53,15 @@ export async function enabledSignInMethods(): Promise<{ providers: OAuthProvider
     const res = await fetch(`${supabaseUrl}/auth/v1/settings`, { headers: { apikey: supabaseAnonKey } });
     const settings = await res.json();
     const external = settings.external ?? {};
-    const providers = (["github", "google"] as const).filter((p) => external[p]);
+    const providers = (["google"] as const).filter((p) => external[p]);
     return { providers, guests: Boolean(external.anonymous_users) };
   } catch {
     // If the settings can't be read, show every option; Supabase reports any that are off.
-    return { providers: ["github", "google"], guests: true };
+    return { providers: ["google"], guests: true };
   }
 }
 
-/** Sends the person to GitHub/Google and back to the page they were on (share link included). */
+/** Sends the person to Google and back to the page they were on (share link included). */
 export async function signInWith(provider: OAuthProvider) {
   return supabase.auth.signInWithOAuth({
     provider,

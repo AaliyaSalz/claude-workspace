@@ -73,7 +73,7 @@ export default function Home() {
     const params = new URLSearchParams(window.location.search);
     const token = params.get("token");
 
-    // After GitHub/Google sign-in the URL carries a one-time ?code=; it has been
+    // After Google sign-in the URL carries a one-time ?code=; it has been
     // exchanged by now, so drop it (keeping ?token= for shared conversations).
     if (params.has("code")) {
       params.delete("code");

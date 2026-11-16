@@ -125,10 +125,10 @@ lib/
 
 ### Authentication setup (Supabase dashboard)
 
-Sign-in uses Supabase Auth: GitHub or Google accounts, or a named guest (anonymous sign-in). Names come from the account, so people can't post as someone else; guests show as "Name (guest)".
+Sign-in uses Supabase Auth: a Google account, or a named guest with no account at all (anonymous sign-in). Google names come from the account, so people can't post as someone else; guests show as "Name (guest)".
 
 1. **Authentication → Sign In / Providers:** turn on **Allow anonymous sign-ins** for guests.
-2. **GitHub:** create an OAuth app at GitHub → Settings → Developer settings → OAuth Apps, with the callback URL `https://<project-ref>.supabase.co/auth/v1/callback`. Paste its Client ID and Secret into Supabase's **GitHub** provider and enable it. (Google works the same way through Google Cloud.)
+2. **Google:** in Google Cloud Console, set up the OAuth consent screen and create an OAuth client ID (type *Web application*) with the redirect URI `https://<project-ref>.supabase.co/auth/v1/callback`. Paste its Client ID and Secret into Supabase's **Google** provider and enable it.
 3. **Authentication → URL Configuration:** set **Site URL** to your production URL and add redirect URLs for production, Vercel previews and `http://localhost:3000/**`.
 
 The sign-in screen shows only the methods that are switched on.
