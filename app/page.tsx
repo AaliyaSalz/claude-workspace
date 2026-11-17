@@ -6,7 +6,8 @@ import rehypeHighlight from "rehype-highlight";
 import CodeBlock from "@/components/CodeBlock";
 import SignIn from "@/components/SignIn";
 import { displayNameOf, signOut, takePendingShareToken, useSession } from "@/lib/auth";
-import { saveMessage, pinMessage, createBranch, generateShareToken, getConversationByToken, saveMemory, getMemories } from "@/lib/db";
+import { saveMessage, pinMessage, createBranch, generateShareToken, joinConversation, listConversations, saveMemory, getMemories } from "@/lib/db";
+import { SITE_URL } from "@/lib/site";
 import { supabase } from "@/lib/supabase";
 
 type Message = {
@@ -88,32 +89,41 @@ export default function Home() {
 
     async function init() {
       try {
+        // Opening a share link makes you a member of that conversation first,
+        // so it shows up in your list below.
+        let openId: string | null = null;
         if (token) {
-          const conv = await getConversationByToken(token);
-          setConversationId(conv.id);
-          setConversations([{ id: conv.id, title: conv.title }]);
+          const shared = await joinConversation(token);
+          if (shared) openId = shared.id;
+          else setConnectionError("That share link doesn't work any more. Ask for a new one.");
+        }
 
-          const { data } = await supabase
-            .from("messages")
-            .select("*")
-            .eq("conversation_id", conv.id)
-            .order("created_at", { ascending: true });
-
-          setMessages(data || []);
-          const mems = await getMemories(conv.id);
-          setMemories(mems.map((m: { content: string }) => m.content));
-        } else {
+        // Row-level security only returns conversations you own or have joined.
+        let list = await listConversations();
+        if (list.length === 0) {
           const { data, error } = await supabase
             .from("conversations")
             .insert({ title: "Main Conversation" })
-            .select()
+            .select("id, title, created_at")
             .single();
           if (error) throw error;
-          setConversationId(data.id);
-          setConversations([{ id: data.id, title: "Main Conversation" }]);
-          const mems = await getMemories(data.id);
-          setMemories(mems.map((m: { content: string }) => m.content));
+          list = [data];
         }
+
+        const index = openId ? Math.max(0, list.findIndex((c) => c.id === openId)) : list.length - 1;
+        const active = list[index];
+        setConversations(list.map((c) => ({ id: c.id, title: c.title })));
+        setActiveConversationIndex(index);
+        setConversationId(active.id);
+
+        const { data } = await supabase
+          .from("messages")
+          .select("*")
+          .eq("conversation_id", active.id)
+          .order("created_at", { ascending: true });
+        setMessages(data || []);
+        const mems = await getMemories(active.id);
+        setMemories(mems.map((m: { content: string }) => m.content));
       } catch (e) {
         console.error("Error:", e);
         setConnectionError("Couldn't connect to the database. Check your connection and refresh the page.");
@@ -421,7 +431,12 @@ export default function Home() {
     if (!conversationId) return;
     try {
       const token = await generateShareToken(conversationId);
-      setShareUrl(`${window.location.origin}?token=${encodeURIComponent(token)}`);
+      // Vercel previews are locked behind a Vercel login, so a link made there
+      // would only work for the project owner. Always share the public site
+      // (all deployments use the same database); local dev keeps its own address.
+      const isLocal = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+      const base = isLocal ? window.location.origin : SITE_URL;
+      setShareUrl(`${base}/?token=${encodeURIComponent(token)}`);
     } catch (e) {
       console.error("Failed to create share link:", e);
       setConnectionError("Couldn't create a share link. Please try again.");

@@ -62,6 +62,7 @@ flowchart LR
 ```
 
 - **The Anthropic API key never reaches the browser.** All Claude calls go through `app/api/chat/route.ts` on the server.
+- **Row-level security** enforces privacy in the database itself: every table only returns rows from conversations you own or have joined through a share link, so the public Supabase key can't be used to read other people's chats. See [`supabase/migrations`](supabase/migrations).
 - **Memory** works by injecting saved facts into the system prompt on every request.
 - **Shared conversations** subscribe to Supabase Realtime, so every participant sees new messages as they arrive.
 - **A scheduled GitHub Action** pings Supabase every 2 days so the free-tier project never auto-pauses.
@@ -70,8 +71,9 @@ flowchart LR
 
 | Table | Purpose |
 |---|---|
-| `conversations` | One row per conversation, with an optional `share_token` for share links |
-| `messages` | Messages per conversation: role, content, sender name, pinned state |
+| `conversations` | One row per conversation: its owner and an optional `share_token` for share links |
+| `conversation_members` | Who may see each conversation: the owner, plus anyone who opened its share link |
+| `messages` | Messages per conversation: role, content, sender name and account, pinned state |
 | `branches` | Links a branch to the parent conversation and the message it forked from |
 | `memories` | Facts saved for Claude to remember |
 
@@ -83,8 +85,10 @@ app/
   page.tsx            # Main workspace UI
   layout.tsx          # Root layout and page metadata
 lib/
+  auth.ts             # Sign-in (Google or guest) and the signed-in user's name
   supabase.ts         # Supabase client
   db.ts               # Database helpers (conversations, messages, branches, memories)
+supabase/migrations/  # SQL for the database schema and row-level security policies
 .github/workflows/
   ci.yml                  # Lint, type check and build on every PR
   supabase-keepalive.yml  # Keeps the Supabase project awake
@@ -132,6 +136,10 @@ Sign-in uses Supabase Auth: a Google account, or a named guest with no account a
 3. **Authentication → URL Configuration:** set **Site URL** to your production URL and add redirect URLs for production, Vercel previews and `http://localhost:3000/**`.
 
 The sign-in screen shows only the methods that are switched on.
+
+### Database setup
+
+Run each file in [`supabase/migrations`](supabase/migrations) in order in Supabase → **SQL Editor**. They add conversation owners and members, and turn on row-level security.
 
 ### Checks
 
