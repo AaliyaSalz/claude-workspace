@@ -7,6 +7,7 @@ import CodeBlock from "@/components/CodeBlock";
 import SignIn from "@/components/SignIn";
 import { displayNameOf, signOut, takePendingShareToken, useSession } from "@/lib/auth";
 import { saveMessage, pinMessage, createBranch, generateShareToken, joinConversation, listConversations, saveMemory, getMemories } from "@/lib/db";
+import { SITE_URL } from "@/lib/site";
 import { supabase } from "@/lib/supabase";
 
 type Message = {
@@ -430,7 +431,12 @@ export default function Home() {
     if (!conversationId) return;
     try {
       const token = await generateShareToken(conversationId);
-      setShareUrl(`${window.location.origin}?token=${encodeURIComponent(token)}`);
+      // Vercel previews are locked behind a Vercel login, so a link made there
+      // would only work for the project owner. Always share the public site
+      // (all deployments use the same database); local dev keeps its own address.
+      const isLocal = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+      const base = isLocal ? window.location.origin : SITE_URL;
+      setShareUrl(`${base}/?token=${encodeURIComponent(token)}`);
     } catch (e) {
       console.error("Failed to create share link:", e);
       setConnectionError("Couldn't create a share link. Please try again.");
