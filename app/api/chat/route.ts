@@ -1,5 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { buildSystemPrompt, toClaudeMessages, type ChatMessage } from "@/lib/chatPrompt";
+import { createClient } from "@supabase/supabase-js";
+import { parseChatRequest, quotaMessage } from "@/lib/chatLimits";
+import { buildSystemPrompt, toClaudeMessages } from "@/lib/chatPrompt";
 
 // Vercel stores the key as ANTHROPIC_KEY; the SDK's default name is ANTHROPIC_API_KEY.
 const client = new Anthropic({
@@ -91,7 +93,42 @@ async function* replyText(
 }
 
 /**
+ * Asks the database whether this person may send another message, and counts it.
+ * The request runs with the caller's own sign-in token, so Supabase verifies who
+ * they are. If the check can't run, the answer is no: an outage must not turn
+ * into unlimited spending.
+ */
+async function checkQuota(token: string): Promise<Response | null> {
+  const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
+    accessToken: async () => token,
+  });
+  const { data, error } = await supabase.rpc("consume_chat_quota");
+
+  if (error) {
+    const signedOut = error.code === "42501" || error.code?.startsWith("PGRST30");
+    if (signedOut) return Response.json({ error: "Please sign in again to chat." }, { status: 401 });
+    console.error("Usage check failed:", error);
+    return Response.json({ error: "Chat is temporarily unavailable. Try again shortly." }, { status: 503 });
+  }
+
+  const quota = data as { allowed?: boolean; reason?: string; retry_after?: number } | null;
+  if (quota?.allowed) return null;
+  return Response.json(
+    { error: quotaMessage(quota?.reason) },
+    { status: 429, headers: { "Retry-After": String(quota?.retry_after ?? 60) } },
+  );
+}
+
+/** What the browser may see of an Anthropic failure; details stay in the server logs. */
+function publicErrorMessage(status: number) {
+  if (status === 429 || status === 529) return "Claude is busy right now. Try again in a moment.";
+  return "Claude couldn't respond. Try again in a moment.";
+}
+
+/**
  * Streams Claude's reply as plain UTF-8 text chunks.
+ *
+ * - Only signed-in people within their usage limits reach Claude.
  *
  * - Errors that happen before any text is produced (bad key, rate limit, bad
  *   request) come back as a normal JSON `{ error }` response with a status code.
@@ -101,10 +138,16 @@ async function* replyText(
  *   cancelled too, so no more tokens are billed.
  */
 export async function POST(request: Request) {
-  const { messages, memories } = (await request.json()) as {
-    messages: ChatMessage[];
-    memories?: string[];
-  };
+  const token = request.headers.get("authorization")?.match(/^Bearer (.+)$/i)?.[1];
+  if (!token) return Response.json({ error: "Please sign in to chat." }, { status: 401 });
+
+  const payload = await request.json().catch(() => null);
+  const parsed = parseChatRequest(payload);
+  if ("error" in parsed) return Response.json({ error: parsed.error }, { status: parsed.status });
+  const { messages, memories } = parsed.request;
+
+  const refused = await checkQuota(token);
+  if (refused) return refused;
 
   const chunks = replyText(
     // Tells Claude who is in the chat; each user message is labelled with its speaker.
@@ -120,7 +163,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Anthropic API error:", error);
     const status = error instanceof Anthropic.APIError && error.status ? error.status : 500;
-    return Response.json({ error: String(error) }, { status });
+    return Response.json({ error: publicErrorMessage(status) }, { status: status >= 500 || status === 429 ? status : 502 });
   }
 
   const encoder = new TextEncoder();
