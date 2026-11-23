@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import CodeBlock from "@/components/CodeBlock";
 import SignIn from "@/components/SignIn";
+import { fitToLimits } from "@/lib/chatLimits";
 import { displayNameOf, signOut, takePendingShareToken, useSession } from "@/lib/auth";
 import { saveMessage, pinMessage, createBranch, generateShareToken, joinConversation, listConversations, saveMemory, getMemories } from "@/lib/db";
 import { SITE_URL } from "@/lib/site";
@@ -244,21 +245,27 @@ export default function Home() {
       const savedUser = await saveMessage(conversationId, "user", text, username);
       updateMessage(userMessage.localId!, { id: savedUser.id });
 
+      // The API only serves signed-in people; getSession refreshes an expired token.
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("Please sign in again to chat.");
+
       const response = await fetch("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          // Include each speaker's name so Claude can tell group-chat participants apart.
-          // Snippets are stored as message rows for pinning; they aren't part of the conversation.
-          messages: history
-            .filter((m) => !m.isError && !m.is_snippet)
-            .map((m) => ({
-              role: m.role,
-              content: m.content,
-              name: m.role === "user" ? m.sender_name || username : undefined,
-            })),
-          memories,
-        }),
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify(
+          fitToLimits(
+            // Include each speaker's name so Claude can tell group-chat participants apart.
+            // Snippets are stored as message rows for pinning; they aren't part of the conversation.
+            history
+              .filter((m) => !m.isError && !m.is_snippet && m.content.trim())
+              .map((m) => ({
+                role: m.role,
+                content: m.content,
+                name: m.role === "user" ? m.sender_name || username : undefined,
+              })),
+            memories,
+          ),
+        ),
         signal: controller.signal,
       });
 
@@ -294,7 +301,7 @@ export default function Home() {
             isError: true,
             content: stopped
               ? "⏹ Stopped before Claude replied."
-              : `⚠️ Claude couldn't respond: ${e instanceof Error ? e.message : String(e)}`,
+              : `⚠️ ${e instanceof Error ? e.message : "Claude couldn't respond."}`,
           },
         ]);
         return;

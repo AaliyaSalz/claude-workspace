@@ -63,6 +63,7 @@ flowchart LR
 
 - **The Anthropic API key never reaches the browser.** All Claude calls go through `app/api/chat/route.ts` on the server.
 - **Row-level security** enforces privacy in the database itself: every table only returns rows from conversations you own or have joined through a share link, so the public Supabase key can't be used to read other people's chats. See [`supabase/migrations`](supabase/migrations).
+- **The chat API is protected.** `/api/chat` only serves signed-in users, limits request size, and checks per-user and app-wide daily limits in Postgres before spending Anthropic credits.
 - **Memory** works by injecting saved facts into the system prompt on every request.
 - **Shared conversations** subscribe to Supabase Realtime, so every participant sees new messages as they arrive.
 - **A scheduled GitHub Action** pings Supabase every 2 days so the free-tier project never auto-pauses.
@@ -139,7 +140,7 @@ The sign-in screen shows only the methods that are switched on.
 
 ### Database setup
 
-Run each file in [`supabase/migrations`](supabase/migrations) in order in Supabase → **SQL Editor**. They add conversation owners and members, and turn on row-level security.
+Run each file in [`supabase/migrations`](supabase/migrations) in order in Supabase → **SQL Editor**. They add conversation owners and members, turn on row-level security, and add chat usage limits.
 
 ### Checks
 
